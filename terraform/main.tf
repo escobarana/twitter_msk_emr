@@ -1,11 +1,3 @@
-locals {
-  name   = "demo-emr-serverless-spark"
-  region = var.region
-
-  vpc_cidr = "10.0.0.0/16"
-  azs      = slice(data.aws_availability_zones.available.names, 0, 3)
-}
-
 ################################################################################
 # Cluster
 ################################################################################
@@ -13,7 +5,7 @@ module "emr_serverless_spark" {
   source  = "terraform-aws-modules/emr/aws//modules/serverless"
   version = "1.1.2"
 
-  name = "${local.name}-demo"
+  name = "emr-serverless-spark-demo"
 
   release_label_prefix = "emr-6"
 
@@ -93,7 +85,7 @@ resource "aws_cloudwatch_log_group" "kafka_log_group" {
 }
 
 resource "aws_msk_configuration" "kafka_config" {
-  kafka_versions    = ["2.8.1"]  # recommended one by Amazon
+  kafka_versions    = ["3.4.0"]
   name              = "${var.global_prefix}-config"
   server_properties = <<EOF
 auto.create.topics.enable = true
@@ -103,16 +95,18 @@ EOF
 
 resource "aws_msk_cluster" "kafka" {
   cluster_name           = var.global_prefix
-  kafka_version          = "2.8.1"  # recommended one by Amazon
+  kafka_version          = "3.4.0"
   number_of_broker_nodes = 3
   broker_node_group_info {
-    instance_type = "kafka.m5.large"
+    instance_type = "kafka.m5.large"  # default value
     storage_info {
       ebs_storage_info {
         volume_size = 1000
       }
     }
-    client_subnets  = [aws_subnet.private_subnet[0].id, aws_subnet.private_subnet[1].id, aws_subnet.private_subnet[2].id]
+    client_subnets = [aws_subnet.private_subnet[0].id,
+      aws_subnet.private_subnet[1].id,
+    aws_subnet.private_subnet[2].id]
     security_groups = [aws_security_group.kafka.id]
   }
   encryption_info {
@@ -150,7 +144,7 @@ resource "aws_msk_cluster" "kafka" {
 ################################################################################
 
 resource "aws_vpc" "default" {
-  cidr_block           = local.vpc_cidr
+  cidr_block           = "10.0.0.0/16"
   enable_dns_hostnames = true
 }
 
@@ -204,13 +198,6 @@ resource "aws_subnet" "public_subnet" {
   map_public_ip_on_launch = true
   availability_zone       = data.aws_availability_zones.available.names[count.index]
 }
-
-#resource "aws_subnet" "bastion_host_subnet" {
-#  vpc_id                  = aws_vpc.default.id
-#  cidr_block              = "10.0.4.0/24"
-#  map_public_ip_on_launch = true
-#  availability_zone       = data.aws_availability_zones.available.names[0]
-#}
 
 ################################################################################
 # Security groups
@@ -288,7 +275,7 @@ resource "null_resource" "private_key_permissions" {
 
 resource "aws_instance" "bastion_host" {
   depends_on             = [aws_msk_cluster.kafka]
-  ami                    = data.aws_ami.amazon_linux_2.id
+  ami                    = data.aws_ami.amazon_linux_2023.id
   instance_type          = "t2.micro"
   key_name               = aws_key_pair.private_key.key_name
   subnet_id              = aws_subnet.public_subnet[0].id # aws_subnet.bastion_host_subnet.id
@@ -303,43 +290,3 @@ resource "aws_instance" "bastion_host" {
     volume_size = 100
   }
 }
-
-# Don't forget to change the EMR_EC2_DefaultRole to allow access to the MSK cluster
-# For that, go to IAM Console -> roles and search for EMR_EC2_DEfaultRole, go to create inline policy and add the following:
-#{
-#    "Version": "2012-10-17",
-#    "Statement": [
-#        {
-#            "Effect": "Allow",
-#            "Action": [
-#                "kafka-cluster:Connect",
-#                "kafka-cluster:AlterCluster",
-#                "kafka-cluster:DescribeCluster"
-#            ],
-#            "Resource": [
-#                "arn:aws:kafka:eu-west-1:<YourAWSAccountID>:cluster/<nameOfMSKCluster>/475eb374-1767-<someMoreNumbers>eb3ae6056b-5"
-#            ]
-#        },
-#        {
-#            "Effect": "Allow",
-#            "Action": [
-#                "kafka-cluster:*Topic*",
-#                "kafka-cluster:WriteData",
-#                "kafka-cluster:ReadData"
-#            ],
-#            "Resource": [
-#                "arn:aws:kafka:eu-west-1:<YourAWSAccountID>:topic/<NameOfYourMSKCluster/*"
-#            ]
-#        },
-#        {
-#            "Effect": "Allow",
-#            "Action": [
-#                "kafka-cluster:AlterGroup",
-#                "kafka-cluster:DescribeGroup"
-#            ],
-#            "Resource": [
-#                "arn:aws:kafka:eu-west-1:<YourAWSAccountID>:group/<NameOfYourMSKCluster>/*"
-#            ]
-#        }
-#    ]
-#}
